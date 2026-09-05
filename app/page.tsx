@@ -254,7 +254,7 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink,openBeatLab}:{
   const [storageMb,setStorageMb] = useState<number|null>(null);
   const [measuredLatency,setMeasuredLatency] = useState<number|null>(null);
   const desktopEngine=useDesktopEngine();
-  const captureSupported=typeof window!=="undefined"&&Boolean(navigator.mediaDevices?.getUserMedia&&window.MediaRecorder);
+  const [captureSupported,setCaptureSupported]=useState(false);
 
   useEffect(()=>{
     let mounted=true;
@@ -269,6 +269,7 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink,openBeatLab}:{
   useEffect(()=>{
     const updateNetwork=()=>setOnline(navigator.onLine);
     updateNetwork();
+    setCaptureSupported(Boolean(navigator.mediaDevices?.getUserMedia&&window.MediaRecorder));
     window.addEventListener("online",updateNetwork);
     window.addEventListener("offline",updateNetwork);
     if(navigator.storage?.estimate)void navigator.storage.estimate().then(({quota=0,usage=0})=>setStorageMb(Math.max(0,Math.round((quota-usage)/1024/1024)))).catch(()=>setStorageMb(null));
