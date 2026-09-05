@@ -24,6 +24,7 @@ export function TransportBar({ onRecordToBeat }: { onRecordToBeat: () => void })
       <button type="button" className={runtime.playing ? "active" : ""} onClick={() => runtime.playing ? runtime.pause() : void runtime.play(0, runtime.playMode)} aria-label={runtime.playing ? "Pause" : "Play"}>{runtime.playing ? "Pause" : "Play"}</button>
       <button type="button" onClick={() => runtime.stop()} aria-label="Stop">Stop</button>
       <button type="button" className={runtime.recording ? "record active" : "record"} onClick={() => { if (!runtime.playing) void runtime.play(); runtime.toggleRecording(); }}>{runtime.recording ? "Recording" : "Record"}</button>
+      <button type="button" className={runtime.overdub ? "active" : ""} onClick={() => runtime.toggleOverdub()} aria-pressed={runtime.overdub}>Overdub</button>
       <button type="button" className={runtime.erase ? "active" : ""} onClick={() => runtime.toggleErase()} aria-pressed={runtime.erase}>Erase</button>
     </div>
     <label className="bl-bpm">
@@ -36,8 +37,8 @@ export function TransportBar({ onRecordToBeat }: { onRecordToBeat: () => void })
     </label>
     <label>
       <span>Count-in</span>
-      <select value={project.countInBars} onChange={(event) => runtime.state.setCountIn(Number(event.target.value) as 1 | 2 | 4)}>
-        {COUNT_IN_OPTIONS.map((bars) => <option key={bars} value={bars}>{bars} bar</option>)}
+      <select value={project.countInBars} onChange={(event) => runtime.state.setCountIn(Number(event.target.value) as typeof project.countInBars)}>
+        {COUNT_IN_OPTIONS.map((bars) => <option key={bars} value={bars}>{bars === 0 ? "Off" : bars === 1 ? "1 bar" : `${bars} bars`}</option>)}
       </select>
     </label>
     <label>
@@ -59,7 +60,7 @@ export function TransportBar({ onRecordToBeat }: { onRecordToBeat: () => void })
       Loop
     </label>
     <div className="bl-save"><i className={runtime.saveStatus} /><span>{saveLabel}</span></div>
-    <button type="button" className="bl-record-beat" onClick={onRecordToBeat}>Record to this beat</button>
+    <button type="button" className="bl-record-beat" onClick={onRecordToBeat}>RECORD TO THIS BEAT</button>
   </section>;
 }
 

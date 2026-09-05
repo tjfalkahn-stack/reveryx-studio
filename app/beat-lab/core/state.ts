@@ -204,10 +204,10 @@ export class BeatLabState {
     this.update("Velocity", (project) => replacePattern(project, updateEvent(selectedPattern(project), eventId, { velocity })));
   }
 
-  recordNote(padId: string, ticks: number, velocity: number, quantizeEnabled: boolean) {
+  recordNote(padId: string, ticks: number, velocity: number, quantizeEnabled: boolean, overdub = true) {
     this.update("Recorded note", (project) => replacePattern(
       project,
-      recordLiveNote(selectedPattern(project), padId, ticks, quantizeEnabled ? project.quantize : "off", velocity),
+      recordLiveNote(selectedPattern(project), padId, ticks, quantizeEnabled ? project.quantize : "off", velocity, 24, overdub),
     ), false);
   }
 
@@ -350,7 +350,8 @@ export class BeatLabState {
     this.project = { ...this.project, beatRevision: this.project.beatRevision + 1 };
   }
 
-  lockVocals() {
+  lockVocalsIfUnset() {
+    if (this.project.vocalLock.capturedAtBeatRevision != null) return;
     this.project = {
       ...this.project,
       vocalLock: { capturedAtBeatRevision: this.project.beatRevision, preserveRecordedTiming: true },

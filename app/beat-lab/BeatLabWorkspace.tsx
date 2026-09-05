@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useStudioSession } from "../session/studio-session";
 import { BeatLabRuntime } from "./engine/runtime";
 import { ArrangementView } from "./components/ArrangementView";
@@ -12,14 +12,23 @@ import { SampleLab } from "./components/SampleLab";
 import { TransportBar } from "./components/TransportBar";
 import { BeatLabRuntimeProvider, useBeatLabRuntime } from "./components/runtime-context";
 
+let sharedRuntime: BeatLabRuntime | null = null;
+
+function getBeatLabRuntime() {
+  if (!sharedRuntime) sharedRuntime = new BeatLabRuntime();
+  return sharedRuntime;
+}
+
 export default function BeatLabWorkspace({ announce, openRecorder }: { announce: (message: string) => void; openRecorder: () => void }) {
-  const runtimeRef = useRef<BeatLabRuntime | null>(null);
-  if (!runtimeRef.current) runtimeRef.current = new BeatLabRuntime();
-  const runtime = runtimeRef.current;
+  const [runtime] = useState(getBeatLabRuntime);
   const session = useStudioSession();
 
   useEffect(() => {
     void runtime.restore();
+    return () => {
+      runtime.stop();
+      void runtime.save();
+    };
   }, [runtime]);
 
   async function recordToThisBeat() {
@@ -27,7 +36,6 @@ export default function BeatLabWorkspace({ announce, openRecorder }: { announce:
       await runtime.ensureContext();
       const payload = await runtime.recordToThisBeat();
       session.applyBeatHandoff(payload);
-      if (session.hasVocals) session.lockVocalsToRevision(payload.beatRevision);
       announce("Beat rendered and handed to the vocal recorder. Beat Lab source is still editable.");
       openRecorder();
     } catch {

@@ -34,6 +34,7 @@ export function PatternEditor() {
       <button type="button" onClick={() => runtime.state.duplicateSelectedPattern()}>Duplicate</button>
       <button type="button" onClick={() => runtime.state.clearSelectedPattern()}>Clear</button>
       <button type="button" onClick={() => runtime.state.quantizeSelectedPattern()}>Quantize</button>
+      <button type="button" className={pattern.mutedPadIds.includes(project.selectedPadId) ? "active" : ""} onClick={() => runtime.state.toggleTrackMute(project.selectedPadId)}>Mute track</button>
       <button type="button" className={runtime.playMode === "pattern" ? "active" : ""} onClick={() => { runtime.setPlayMode("pattern"); void runtime.play(0, "pattern"); }}>Play pattern</button>
     </header>
     {overflow.length > 0 && <p className="bl-warning">{overflow.length} recorded {overflow.length === 1 ? "event sits" : "events sit"} beyond this length and will return if you restore bars. Nothing was deleted.</p>}

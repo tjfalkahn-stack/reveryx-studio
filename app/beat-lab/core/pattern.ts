@@ -133,7 +133,10 @@ export function quantizePattern(pattern: Pattern, grid: QuantizeGrid): Pattern {
   };
 }
 
-export function recordLiveNote(pattern: Pattern, padId: string, musicalTicks: number, quantize: QuantizeGrid | "off", velocity: number, durationTicks = 24): Pattern {
+export function recordLiveNote(pattern: Pattern, padId: string, musicalTicks: number, quantize: QuantizeGrid | "off", velocity: number, durationTicks = 24, overdub = true): Pattern {
   const startTicks = quantize === "off" ? Math.max(0, musicalTicks) : Math.max(0, quantizeTicks(musicalTicks, quantize));
-  return { ...pattern, events: [...pattern.events, createNote(padId, startTicks, durationTicks, velocity)] };
+  const events = overdub
+    ? pattern.events
+    : pattern.events.filter((event) => !(event.padId === padId && event.startTicks === startTicks));
+  return { ...pattern, events: [...events, createNote(padId, startTicks, durationTicks, velocity)] };
 }

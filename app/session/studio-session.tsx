@@ -56,24 +56,27 @@ export function StudioSessionProvider({ children }: { children: ReactNode }) {
     sessionBeat,
     setSessionBeat,
     applyBeatHandoff: (payload) => {
-      setSessionBeat({
-        song: payload.title,
-        source: "Beat Lab",
-        beatUrl: payload.beatUrl,
-        importedTracks: [{
-          id: Date.now(),
-          name: `${payload.title}.wav`,
-          url: payload.beatUrl,
-          duration: payload.duration,
-          peaks: payload.peaks,
-          role: "BEAT",
-          format: "WAV",
-        }],
-        bpm: payload.bpm,
-        bpmDetected: true,
-        sectionMarkers: payload.sectionMarkers,
-        beatRevision: payload.beatRevision,
-        beatSource: "beat-lab",
+      setSessionBeat((current) => {
+        const vocals = current.importedTracks.filter((track) => track.role === "VOCAL");
+        return {
+          song: payload.title,
+          source: "Beat Lab",
+          beatUrl: payload.beatUrl,
+          importedTracks: [{
+            id: Date.now(),
+            name: `${payload.title}.wav`,
+            url: payload.beatUrl,
+            duration: payload.duration,
+            peaks: payload.peaks,
+            role: "BEAT",
+            format: "WAV",
+          }, ...vocals],
+          bpm: payload.bpm,
+          bpmDetected: true,
+          sectionMarkers: payload.sectionMarkers,
+          beatRevision: payload.beatRevision,
+          beatSource: "beat-lab",
+        };
       });
     },
     hasVocals,

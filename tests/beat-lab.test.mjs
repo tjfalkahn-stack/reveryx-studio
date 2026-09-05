@@ -60,6 +60,16 @@ test("pattern create, step edit, quantize and mute", () => {
   assert.equal(pattern.events[0].startTicks, 0);
 });
 
+test("overdub stacks notes while replace mode overwrites the same step", () => {
+  let pattern = createPattern("Take", 2);
+  pattern = recordLiveNote(pattern, "A-01", 0, "1/16", 90, 24, true);
+  pattern = recordLiveNote(pattern, "A-01", 0, "1/16", 110, 24, true);
+  assert.equal(pattern.events.length, 2);
+  pattern = recordLiveNote(pattern, "A-01", 0, "1/16", 80, 24, false);
+  assert.equal(pattern.events.length, 1);
+  assert.equal(pattern.events[0].velocity, 80);
+});
+
 test("arrangement ordering and section markers", () => {
   const patterns = createDefaultPatterns(8);
   let sections = createDefaultArrangement(patterns[0].id);

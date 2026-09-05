@@ -16,7 +16,7 @@ export const QUANTIZE_TICKS: Record<QuantizeGrid, number> = {
 
 export const QUANTIZE_OPTIONS: QuantizeGrid[] = ["1/8", "1/8t", "1/16", "1/16t", "1/32", "1/32t"];
 export const PATTERN_BAR_OPTIONS: PatternBars[] = [1, 2, 4, 8, 16];
-export const COUNT_IN_OPTIONS: CountInBars[] = [1, 2, 4];
+export const COUNT_IN_OPTIONS: CountInBars[] = [0, 1, 2, 4];
 
 export function clampBpm(bpm: number): number {
   if (!Number.isFinite(bpm)) return 120;

@@ -12,7 +12,6 @@ import {
   countInSeconds,
   patternLengthSeconds,
   QUANTIZE_TICKS,
-  secondsPerBar,
   secondsPerBeat,
   secondsToTicks,
   ticksToSeconds,
@@ -67,6 +66,7 @@ export class BeatLabRuntime {
   playheadVersion = 0;
   private uiListeners = new Set<() => void>();
   uiVersion = 0;
+  private restored = false;
 
   constructor(state = new BeatLabState()) {
     this.state = state;
@@ -98,6 +98,10 @@ export class BeatLabRuntime {
   }
 
   async restore() {
+    if (this.restored) {
+      if (this.ctx?.state === "suspended") await this.ctx.resume().catch(() => undefined);
+      return;
+    }
     try {
       const loaded = await loadActiveProject();
       if (loaded) {
@@ -113,9 +117,11 @@ export class BeatLabRuntime {
       await this.warmAssets();
       this.saveStatus = "saved";
       this.state.dirty = false;
+      this.restored = true;
     } catch {
       this.saveStatus = "error";
     }
+    this.notifyUi();
   }
 
   async ensureContext(): Promise<AudioContext> {
@@ -280,14 +286,17 @@ export class BeatLabRuntime {
 
   private startRepeat(padId: string, velocity: number) {
     this.stopRepeat(padId);
-    const step = ticksToSeconds(QUANTIZE_TICKS[this.state.project.noteRepeat.grid], this.state.project.bpm);
-    const tick = () => {
-      if (!this.held.has(padId) || !this.state.project.noteRepeat.enabled) return;
-      void this.triggerPad(padId, velocity);
-      if (this.recording && this.playing) this.captureNote(padId, velocity);
-      this.repeatTimers.set(padId, window.setTimeout(tick, step * 1000) as unknown as number);
+    if (!this.ctx) return;
+    const schedule = (audioTime: number) => {
+      if (!this.held.has(padId) || !this.state.project.noteRepeat.enabled || !this.ctx) return;
+      const step = ticksToSeconds(QUANTIZE_TICKS[this.state.project.noteRepeat.grid], this.state.project.bpm);
+      const next = audioTime + step;
+      void this.triggerPad(padId, velocity, next);
+      if (this.recording && this.playing) this.captureNote(padId, velocity, next);
+      const delay = Math.max(8, (next - this.ctx.currentTime) * 1000 - 12);
+      this.repeatTimers.set(padId, window.setTimeout(() => schedule(next), delay) as unknown as number);
     };
-    this.repeatTimers.set(padId, window.setTimeout(tick, step * 1000) as unknown as number);
+    schedule(this.ctx.currentTime);
   }
 
   private stopRepeat(padId: string) {
@@ -296,13 +305,16 @@ export class BeatLabRuntime {
     this.repeatTimers.delete(padId);
   }
 
-  private captureNote(padId: string, velocity: number) {
+  private captureNote(padId: string, velocity: number, audioTime?: number) {
     if (!this.recordSnapshotTaken) {
       this.state.history.snapshot("Record take", this.state.project);
       this.recordSnapshotTaken = true;
     }
-    const ticks = wrapPatternTicks(secondsToTicks(this.musicalSeconds(), this.state.project.bpm), selectedPattern(this.state.project).bars);
-    this.state.recordNote(padId, ticks, Math.round(velocity * 127), true);
+    const seconds = audioTime != null && this.ctx
+      ? Math.max(0, audioTime - this.origin)
+      : this.musicalSeconds();
+    const ticks = wrapPatternTicks(secondsToTicks(seconds, this.state.project.bpm), selectedPattern(this.state.project).bars);
+    this.state.recordNote(padId, ticks, Math.round(velocity * 127), true, this.overdub);
   }
 
   musicalSeconds(): number {
@@ -388,6 +400,11 @@ export class BeatLabRuntime {
 
   toggleErase() {
     this.erase = !this.erase;
+    this.notifyUi();
+  }
+
+  toggleOverdub() {
+    this.overdub = !this.overdub;
     this.notifyUi();
   }
 
@@ -648,6 +665,7 @@ export class BeatLabRuntime {
   }
 
   async save() {
+    if (!this.restored) return;
     this.saveStatus = "saving";
     this.notifyUi();
     try {
@@ -695,6 +713,7 @@ export class BeatLabRuntime {
   }
 
   async recordToThisBeat(): Promise<BeatToRecorderHandoff> {
+    await this.restore();
     await this.save();
     this.state.bumpRevision();
     const mix = this.mixProject("master");
@@ -703,7 +722,7 @@ export class BeatLabRuntime {
     this.objectUrls.add(url);
     const peaks = peaksFromSamples(mix.left);
     const placed = placeArrangement(this.state.project.arrangement, this.state.project.patterns, this.state.project.bpm);
-    this.state.lockVocals();
+    this.state.lockVocalsIfUnset();
     return {
       projectId: this.state.project.id,
       title: this.state.project.title,

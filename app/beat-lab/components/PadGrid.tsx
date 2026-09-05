@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { BANKS, padsInBank } from "../core/pads";
 import { keyToPadIndex, isTypingTarget } from "../input/pad-input";
 import { useBeatLabRuntime } from "./runtime-context";
@@ -10,8 +10,6 @@ export function PadGrid() {
   const project = useSyncExternalStore(runtime.state.subscribe, runtime.state.getSnapshot, runtime.state.getSnapshot);
   const pads = padsInBank(project.pads, project.selectedBank);
   const [pressed, setPressed] = useState<Set<string>>(new Set());
-  const pressedRef = useRef(pressed);
-  pressedRef.current = pressed;
 
   const on = useCallback((id: string, velocity = 1) => {
     setPressed((current) => new Set(current).add(id));

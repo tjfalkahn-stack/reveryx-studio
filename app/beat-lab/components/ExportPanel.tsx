@@ -75,6 +75,7 @@ export function ExportPanel({ announce }: { announce: (message: string) => void 
     <small>Export · 48 kHz / 24-bit WAV</small>
     <button type="button" disabled={Boolean(busy)} onClick={() => download(runtime.renderStemWav("master", `${project.title} beat`), `${project.title.replace(/[^a-z0-9-_]+/gi, "-")}-beat.wav`)}>Full beat WAV</button>
     <button type="button" disabled={Boolean(busy)} onClick={() => void exportPackage(false)}>{busy || "Aligned beat + stems"}</button>
+    <button type="button" disabled={Boolean(busy)} onClick={() => void exportPackage(true)}>Beat + stems + vocal captures</button>
     <button type="button" disabled={Boolean(busy)} onClick={() => download(new Blob([JSON.stringify(runtime.exportManifest(), null, 2)], { type: "application/json" }), `${project.title.replace(/[^a-z0-9-_]+/gi, "-")}-manifest.json`)}>Project manifest</button>
     <p>Stems share the same origin. Vocals stay on their recorded timestamps in the existing SessionPort / Pro Tools Bridge path. Sample rate {PRO_TOOLS_SAMPLE_RATE} Hz.</p>
   </section>;
