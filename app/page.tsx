@@ -3,8 +3,12 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import LinkSessions from "./link-sessions";
+import BeatLabWorkspace from "./beat-lab/BeatLabWorkspace";
+import { decodeAt48k, encodeBwf24, PRO_TOOLS_SAMPLE_RATE } from "./audio/bwf";
+import { detectBpmFromFilename, detectTrackRole, peaksFromSamples, shouldWarnVocalAlignment, titleFromFilename } from "./session/load-song";
+import { StudioSessionProvider, useStudioSession } from "./session/studio-session";
 
-type View = "session" | "link" | "wordwave" | "library" | "deliveries";
+type View = "session" | "beatlab" | "link" | "wordwave" | "library" | "deliveries";
 type TakeState = "captured" | "keep" | "recovery";
 type CapturedTake = { id:number; name:string; url:string; seconds:number; state:TakeState; mime:string; start:number; punchLabel:string };
 type ImportedTrack = { id:number; name:string; url:string; duration:number; peaks:number[]; role:string; format:string };
@@ -94,51 +98,7 @@ const lyricPunches = [
 ];
 function formatTime(seconds:number) { const safe=Math.max(0,seconds||0); return `${Math.floor(safe/60)}:${String(Math.floor(safe%60)).padStart(2,"0")}.${String(Math.floor((safe%1)*10))}`; }
 
-const PRO_TOOLS_SAMPLE_RATE=48000;
 function safeAudioName(value:string){return value.replace(/[^a-z0-9-_]+/gi,"-").replace(/^-+|-+$/g,"")||"audio";}
-function writeAscii(view:DataView,offset:number,value:string,length:number){for(let index=0;index<length;index++)view.setUint8(offset+index,index<value.length?value.charCodeAt(index)&255:0);}
-function encodeBwf24(buffer:AudioBuffer,timeReferenceSamples:number,description:string){
-  const channels=Math.min(2,Math.max(1,buffer.numberOfChannels));
-  const frames=buffer.length;
-  const bytesPerSample=3;
-  const dataBytes=frames*channels*bytesPerSample;
-  const dataPad=dataBytes%2;
-  const bextBytes=602;
-  const total=12+(8+bextBytes)+(8+16)+(8+dataBytes+dataPad);
-  const output=new ArrayBuffer(total);
-  const view=new DataView(output);
-  let offset=0;
-  writeAscii(view,offset,"RIFF",4);offset+=4;view.setUint32(offset,total-8,true);offset+=4;writeAscii(view,offset,"WAVE",4);offset+=4;
-  writeAscii(view,offset,"bext",4);offset+=4;view.setUint32(offset,bextBytes,true);offset+=4;
-  const now=new Date();
-  writeAscii(view,offset,description.slice(0,255),256);offset+=256;
-  writeAscii(view,offset,"REVERYX",32);offset+=32;
-  writeAscii(view,offset,`REVERYX-${now.getTime()}`,32);offset+=32;
-  writeAscii(view,offset,now.toISOString().slice(0,10),10);offset+=10;
-  writeAscii(view,offset,now.toISOString().slice(11,19),8);offset+=8;
-  const time=Math.max(0,Math.round(timeReferenceSamples));
-  view.setUint32(offset,time>>>0,true);offset+=4;view.setUint32(offset,Math.floor(time/4294967296),true);offset+=4;
-  view.setUint16(offset,1,true);offset+=2;offset+=64;offset+=190;
-  writeAscii(view,offset,"fmt ",4);offset+=4;view.setUint32(offset,16,true);offset+=4;view.setUint16(offset,1,true);offset+=2;view.setUint16(offset,channels,true);offset+=2;view.setUint32(offset,PRO_TOOLS_SAMPLE_RATE,true);offset+=4;view.setUint32(offset,PRO_TOOLS_SAMPLE_RATE*channels*bytesPerSample,true);offset+=4;view.setUint16(offset,channels*bytesPerSample,true);offset+=2;view.setUint16(offset,24,true);offset+=2;
-  writeAscii(view,offset,"data",4);offset+=4;view.setUint32(offset,dataBytes,true);offset+=4;
-  const channelData=Array.from({length:channels},(_,channel)=>buffer.getChannelData(channel));
-  for(let frame=0;frame<frames;frame++)for(let channel=0;channel<channels;channel++){
-    const sample=Math.max(-1,Math.min(1,channelData[channel][frame]||0));
-    let value=sample<0?Math.round(sample*8388608):Math.round(sample*8388607);
-    if(value<0)value+=16777216;
-    view.setUint8(offset++,value&255);view.setUint8(offset++,(value>>>8)&255);view.setUint8(offset++,(value>>>16)&255);
-  }
-  return new Blob([output],{type:"audio/wav"});
-}
-async function decodeAt48k(url:string){
-  const context=new AudioContext();
-  const decoded=await context.decodeAudioData(await (await fetch(url)).arrayBuffer());
-  await context.close();
-  if(decoded.sampleRate===PRO_TOOLS_SAMPLE_RATE)return decoded;
-  const offline=new OfflineAudioContext(decoded.numberOfChannels,Math.max(1,Math.ceil(decoded.duration*PRO_TOOLS_SAMPLE_RATE)),PRO_TOOLS_SAMPLE_RATE);
-  const source=offline.createBufferSource();source.buffer=decoded;source.connect(offline.destination);source.start();
-  return offline.startRendering();
-}
 const chain = [
   { name:"TUNE", value:"E♭ Minor · 18 ms", tone:"violet" },
   { name:"SCULPT", value:"Presence +2.1", tone:"blue" },
@@ -180,22 +140,24 @@ export default function Home() {
     window.setTimeout(() => setToast(""), 2600);
   }
 
-  return <main className="studio-shell">
+  return <StudioSessionProvider><main className="studio-shell">
     {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
     <AppRail view={view} setView={setView} />
     <section className="workspace">
-      {view === "session" && <SessionWorkspace announce={announce} openVault={() => setView("library")} openLyrics={() => setView("wordwave")} openLink={() => setView("link")} />}
+      {view === "session" && <SessionWorkspace announce={announce} openVault={() => setView("library")} openLyrics={() => setView("wordwave")} openLink={() => setView("link")} openBeatLab={() => setView("beatlab")} />}
+      {view === "beatlab" && <BeatLabWorkspace announce={announce} openRecorder={() => setView("session")} />}
       {view === "link" && <LinkSessions announce={announce} />}
       {view === "wordwave" && <WordwaveStudio announce={announce} openSession={() => setView("session")} />}
       {view === "library" && <LibraryHub announce={announce} openSession={() => setView("session")} />}
       {view === "deliveries" && <Deliveries announce={announce} />}
     </section>
-  </main>;
+  </main></StudioSessionProvider>;
 }
 
 function AppRail({view,setView}:{view:View;setView:(view:View)=>void}) {
   const items:{id:View;icon:RailIconName;label:string}[] = [
     {id:"session",icon:"session",label:"Record"},
+    {id:"beatlab",icon:"beatlab",label:"Beat Lab"},
     {id:"link",icon:"link",label:"Collaborate"},
     {id:"library",icon:"library",label:"Library"},
     {id:"deliveries",icon:"deliveries",label:"Finish"},
@@ -213,11 +175,12 @@ function AppRail({view,setView}:{view:View;setView:(view:View)=>void}) {
   </aside>;
 }
 
-type RailIconName = "session" | "link" | "library" | "deliveries";
+type RailIconName = "session" | "beatlab" | "link" | "library" | "deliveries";
 
 function RailIcon({name}:{name:RailIconName}) {
   const common = {width:24,height:24,viewBox:"0 0 24 24",fill:"none",xmlns:"http://www.w3.org/2000/svg","aria-hidden":true as const};
   if (name === "session") return <svg {...common}><circle cx="12" cy="12" r="7.25"/><circle cx="12" cy="12" r="2.25"/><path d="M12 2.75v2M12 19.25v2M2.75 12h2M19.25 12h2"/></svg>;
+  if (name === "beatlab") return <svg {...common}><rect x="3.5" y="3.5" width="7" height="7"/><rect x="13.5" y="3.5" width="7" height="7"/><rect x="3.5" y="13.5" width="7" height="7"/><rect x="13.5" y="13.5" width="7" height="7"/></svg>;
   if (name === "link") return <svg {...common}><path d="M9.5 14.5 14.5 9"/><path d="M7.4 16.6 5.8 18.2a3.4 3.4 0 0 1-4.8-4.8l3.2-3.2A3.4 3.4 0 0 1 9 10M14.9 14a3.4 3.4 0 0 0 4.9-.2l3.2-3.2a3.4 3.4 0 0 0-4.8-4.8l-1.6 1.6"/></svg>;
   if (name === "library") return <svg {...common}><path d="M4.5 5.5h6v13h-6zM13.5 5.5h6v13h-6z"/><path d="M7.5 9h0M16.5 9h0"/></svg>;
   return <svg {...common}><path d="M5 15.5v3.25h14V5H8.75"/><path d="M12 5h7v7M19 5l-9 9"/></svg>;
@@ -233,7 +196,7 @@ function TransportIcon({name}:{name:TransportIconName}) {
   return <svg {...common}><path d="m8 5.5 10 6.5-10 6.5z"/></svg>;
 }
 
-function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(message:string)=>void;openVault:()=>void;openLyrics:()=>void;openLink:()=>void}) {
+function SessionWorkspace({announce,openVault,openLyrics,openLink,openBeatLab}:{announce:(message:string)=>void;openVault:()=>void;openLyrics:()=>void;openLink:()=>void;openBeatLab:()=>void}) {
   const fileInput = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder|null>(null);
   const streamRef = useRef<MediaStream|null>(null);
@@ -249,10 +212,14 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(me
   const monitorSourceRef = useRef<MediaStreamAudioSourceNode|null>(null);
   const monitorGainRef = useRef<GainNode|null>(null);
   const takePlaybackRef = useRef<HTMLAudioElement|null>(null);
-  const [song,setSong] = useState("Pressure Again");
-  const [source,setSource] = useState("Stems");
-  const [beatUrl,setBeatUrl] = useState("");
-  const [importedTracks,setImportedTracks] = useState<ImportedTrack[]>([]);
+  const { sessionBeat, setSessionBeat, setHasVocals, hasVocals, lockedBeatRevision, lockVocalsToRevision } = useStudioSession();
+  const song = sessionBeat.song;
+  const source = sessionBeat.source;
+  const beatUrl = sessionBeat.beatUrl;
+  const importedTracks = sessionBeat.importedTracks;
+  const bpm = sessionBeat.bpm;
+  const bpmDetected = sessionBeat.bpmDetected;
+  const sectionMarkers = sessionBeat.sectionMarkers;
   const [playing,setPlaying] = useState(false);
   const [recording,setRecording] = useState(false);
   const [arming,setArming] = useState(false);
@@ -279,8 +246,6 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(me
   const [aiOpen,setAiOpen] = useState(false);
   const [beatToolsOpen,setBeatToolsOpen] = useState(false);
   const [playbackRate,setPlaybackRate] = useState(1);
-  const [bpm,setBpm] = useState(128);
-  const [bpmDetected,setBpmDetected] = useState(false);
   const [monitorEnabled,setMonitorEnabled] = useState(true);
   const [auditioningTakeId,setAuditioningTakeId] = useState<number|null>(null);
   const [speakerMode,setSpeakerMode] = useState(false);
@@ -295,7 +260,7 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(me
     let mounted=true;
     void recoverTakes().then(recovered=>{
       if(!mounted)return;
-      if(recovered.length)setCapturedTakes(recovered);
+      if(recovered.length){setCapturedTakes(recovered);setHasVocals(true);}
       setRecoveryReady(true);
     }).catch(()=>setRecoveryReady(true));
     return()=>{mounted=false;};
@@ -312,8 +277,7 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(me
 
   async function inspectAudio(file:File,index:number):Promise<ImportedTrack> {
     const url=URL.createObjectURL(file);
-    const lower=file.name.toLowerCase();
-    const role=lower.includes("drum")?"DRUMS":lower.includes("bass")||lower.includes("808")?"BASS":lower.includes("vocal")?"VOCAL":lower.includes("music")||lower.includes("inst")?"MUSIC":index===0?"BEAT":"STEM";
+    const role=detectTrackRole(file.name,index);
     let duration=0;
     let peaks=wave.slice(0,48);
     try {
@@ -321,15 +285,7 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(me
       const context=new AudioContextClass();
       const decoded=await context.decodeAudioData(await file.arrayBuffer());
       duration=decoded.duration;
-      const channel=decoded.getChannelData(0);
-      const buckets=48;
-      const size=Math.max(1,Math.floor(channel.length/buckets));
-      peaks=Array.from({length:buckets},(_,bucket)=>{
-        let max=0;
-        const start=bucket*size;
-        for(let cursor=start;cursor<Math.min(start+size,channel.length);cursor+=Math.max(1,Math.floor(size/160))) max=Math.max(max,Math.abs(channel[cursor]));
-        return Math.max(12,Math.round(max*100));
-      });
+      peaks=peaksFromSamples(decoded.getChannelData(0));
       await context.close();
     } catch { /* Unsupported compressed files still remain available for handoff. */ }
     return {id:Date.now()+index,name:file.name,url,duration,peaks,role,format:file.name.split(".").pop()?.toUpperCase()||"AUDIO"};
@@ -338,14 +294,19 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(me
     if (!files?.length) return;
     const audioFiles=files.filter(file=>!file.name.toLowerCase().endsWith(".zip"));
     const inspected=await Promise.all(audioFiles.map(inspectAudio));
-    const title=files[0].name.replace(/\.[^/.]+$/,"") || "Untitled Session";
-    const filenameBpm=files[0].name.match(/(?:^|\D)(\d{2,3})\s*bpm(?:\D|$)/i)?.[1];
-    setSong(title);
-    setSource(files.length>1||files[0].name.toLowerCase().endsWith(".zip")?"Stems":"Stereo Beat");
-    setImportedTracks(inspected);
-    setBeatUrl(inspected[0]?.url||"");
-    setBpm(filenameBpm?Number(filenameBpm):128);
-    setBpmDetected(Boolean(filenameBpm));
+    const title=titleFromFilename(files[0].name);
+    const filenameBpm=detectBpmFromFilename(files[0].name);
+    setSessionBeat({
+      song: title,
+      source: files.length>1||files[0].name.toLowerCase().endsWith(".zip")?"Stems":"Stereo Beat",
+      importedTracks: inspected,
+      beatUrl: inspected[0]?.url||"",
+      bpm: filenameBpm||128,
+      bpmDetected: Boolean(filenameBpm),
+      sectionMarkers: [],
+      beatRevision: sessionBeat.beatRevision,
+      beatSource: "file",
+    });
     setPlaybackRate(1);
     setBeatToolsOpen(false);
     setSoundChecked(false);
@@ -442,6 +403,8 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(me
         setCapturedTakes(value => {
           const take={id,name:`Verse Lead · Take ${String(value.length+1).padStart(2,"0")}`,url:URL.createObjectURL(blob),seconds,state:"captured" as TakeState,mime:blob.type,start:takeStartRef.current,punchLabel:takeLabelRef.current};
           void protectTake(take,blob).then(()=>announce("Take captured and protected on this device.")).catch(()=>announce("Take captured. Download it before closing this session."));
+          setHasVocals(true);
+          if(sessionBeat.beatSource==="beat-lab")lockVocalsToRevision(sessionBeat.beatRevision);
           return [...value,take];
         });
         stream.getTracks().forEach(track=>track.stop());
@@ -614,17 +577,23 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(me
     if (!window.confirm("Remove this beat and its stems from the REVERYX session? The original files will not be deleted.")) return;
     beatRef.current?.pause();
     importedTracks.forEach(track=>URL.revokeObjectURL(track.url));
-    setImportedTracks([]);
-    setBeatUrl("");
-    setSong("Untitled Session");
-    setSource("Stems");
+    setSessionBeat({
+      song: "Untitled Session",
+      source: "Stems",
+      importedTracks: [],
+      beatUrl: "",
+      bpm: 128,
+      bpmDetected: false,
+      sectionMarkers: [],
+      beatRevision: sessionBeat.beatRevision,
+      beatSource: "",
+    });
     setCurrentTime(0);
     setPunchPoint(0);
     setPunchLabel("Manual timeline punch");
     setSoundChecked(false);
     setPlaying(false);
     setPlaybackRate(1);
-    setBpmDetected(false);
     setBeatToolsOpen(false);
     announce("Song removed from this session. The original files remain untouched.");
   }
@@ -634,6 +603,7 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(me
   const flowStep=!importedTracks.length?0:!soundChecked?1:recording||arming?2:needsDecision?3:stage>0?4:2;
   const adjustedBpm=bpmDetected?Math.round(bpm*playbackRate):null;
   const keptTakes=capturedTakes.filter(take=>take.state==="keep").length;
+  const alignment=shouldWarnVocalAlignment({hasVocals,lockedRevision:lockedBeatRevision,beatRevision:sessionBeat.beatRevision,preserveVocalTiming:true});
 
   return <>
     <header className="qrx-topbar">
@@ -643,8 +613,9 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(me
     </header>
 
     <section className={`qrx-page ${!importedTracks.length?"record-now-page":""}`}>
-      {!importedTracks.length?<RecordNowHome start={()=>fileInput.current?.click()} openSetup={()=>setSetupOpen(true)} openLink={openLink} capturedTakes={capturedTakes} recoveryReady={recoveryReady} captureSupported={captureSupported} online={online} storageMb={storageMb} desktopEngine={desktopEngine}/>:<>
+      {!importedTracks.length?<RecordNowHome start={()=>fileInput.current?.click()} openSetup={()=>setSetupOpen(true)} openLink={openLink} openBeatLab={openBeatLab} capturedTakes={capturedTakes} recoveryReady={recoveryReady} captureSupported={captureSupported} online={online} storageMb={storageMb} desktopEngine={desktopEngine}/>:<>
       <nav className="qrx-flow" aria-label="Session progress">{["Load","Sound Check","Record","Decide","Finish"].map((name,index)=><div key={name} className={`${flowStep===index?"active":""} ${flowStep>index?"done":""}`}><span>{flowStep>index?"✓":index+1}</span><strong>{name}</strong></div>)}</nav>
+      {alignment.warn&&<div className="qrx-align-banner" role="status">{alignment.message} <button type="button" onClick={()=>lockVocalsToRevision(sessionBeat.beatRevision)}>Keep recorded timing</button></div>}
 
       <section className={`session-ready-strip ${soundChecked?"armed":""}`} aria-label="Session readiness">
         <div><span>SONG</span><strong>LOADED</strong><small>{importedTracks.length===1?"1 audio source":`${importedTracks.length} audio sources`}</small></div>
@@ -663,7 +634,7 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink}:{announce:(me
         <div className={`qrx-wave-stage ${recording?"live":""} ${!importedTracks.length?"empty":""}`}>
           <div className="qrx-wave-head"><div className="qrx-song-copy"><span>{importedTracks.length?source.toUpperCase():"SESSION EMPTY"}</span><strong>{importedTracks.length?song:"Choose audio to begin"}</strong></div><div className="qrx-wave-meta">{importedTracks.length>0&&<><div><b>{formatTime(currentTime)}</b><span>{adjustedBpm?`${adjustedBpm} BPM · `:"Tempo not detected · "}Key not analyzed</span></div><button className={beatToolsOpen?"active":""} onClick={()=>setBeatToolsOpen(!beatToolsOpen)} aria-expanded={beatToolsOpen}>Song Tools</button></>}</div></div>
           {beatToolsOpen&&<div className="qrx-song-tools"><div><span>PLAYBACK SPEED</span><div className="qrx-speed-options">{[.75,.9,1,1.1,1.25].map(rate=><button key={rate} className={playbackRate===rate?"selected":""} onClick={()=>changePlaybackRate(rate)}>{rate}x</button>)}</div><small>{bpm} BPM original · {adjustedBpm} BPM playback</small></div><div className="qrx-song-file-actions"><button onClick={()=>setSetupOpen(true)}>Replace song</button><button className="remove" onClick={removeSong}>Remove from session</button></div></div>}
-          {importedTracks.length?<><div className="qrx-wave" role="button" tabIndex={0} aria-label="Song timeline. Click to set a punch point." onClick={selectTimelinePunch} onKeyDown={event=>{if(event.key==="Enter")setPunchAt(punchPoint);}}>{importedTracks[0].peaks.map((height,index)=><i key={index} style={{height:`${height}%`}}/>)}<b className="qrx-playhead" style={{left:`${Math.min(100,(currentTime/(importedTracks[0].duration||138))*100)}%`}}/><b className="qrx-punch" style={{left:`${Math.min(100,(punchPoint/(importedTracks[0].duration||138))*100)}%`}}><span>{formatTime(punchPoint)}</span></b></div><div className="qrx-lyric"><span>PUNCH POSITION</span><strong>{punchLabel}</strong><button onClick={openLyrics}>Writing help</button></div></>:<button className="qrx-empty-wave" onClick={()=>fileInput.current?.click()}><span className="qrx-empty-signal"><i/><i/><i/><i/><i/></span><strong>Choose your audio.</strong><small>REVERYX identifies a beat, stems, or a session handoff automatically.</small></button>}
+          {importedTracks.length?<><div className="qrx-wave" role="button" tabIndex={0} aria-label="Song timeline. Click to set a punch point." onClick={selectTimelinePunch} onKeyDown={event=>{if(event.key==="Enter")setPunchAt(punchPoint);}}>{importedTracks[0].peaks.map((height,index)=><i key={index} style={{height:`${height}%`}}/>)}<b className="qrx-playhead" style={{left:`${Math.min(100,(currentTime/(importedTracks[0].duration||138))*100)}%`}}/><b className="qrx-punch" style={{left:`${Math.min(100,(punchPoint/(importedTracks[0].duration||138))*100)}%`}}><span>{formatTime(punchPoint)}</span></b></div>{sectionMarkers.length>0&&<div className="qrx-sections" aria-label="Beat Lab section markers">{sectionMarkers.map((marker)=> <span key={marker.id} style={{flexGrow:Math.max(0.2,marker.endSeconds-marker.startSeconds)}}>{marker.name}</span>)}</div>}<div className="qrx-lyric"><span>PUNCH POSITION</span><strong>{punchLabel}</strong><button onClick={openLyrics}>Writing help</button>{sessionBeat.beatSource==="beat-lab"&&<button onClick={openBeatLab}>Back to Beat Lab</button>}</div></>:<button className="qrx-empty-wave" onClick={()=>fileInput.current?.click()}><span className="qrx-empty-signal"><i/><i/><i/><i/><i/></span><strong>Choose your audio.</strong><small>REVERYX identifies a beat, stems, or a session handoff automatically.</small></button>}
         </div>
 
         <div className={`qrx-focus-actions ${needsDecision?"review":""}`}>
@@ -712,7 +683,7 @@ function NativeEnginePanel({engine}:{engine:DesktopEngine}) {
   </section>;
 }
 
-function RecordNowHome({start,openSetup,openLink,capturedTakes,recoveryReady,captureSupported,online,storageMb,desktopEngine}:{start:()=>void;openSetup:()=>void;openLink:()=>void;capturedTakes:CapturedTake[];recoveryReady:boolean;captureSupported:boolean;online:boolean;storageMb:number|null;desktopEngine:DesktopEngine}) {
+function RecordNowHome({start,openSetup,openLink,openBeatLab,capturedTakes,recoveryReady,captureSupported,online,storageMb,desktopEngine}:{start:()=>void;openSetup:()=>void;openLink:()=>void;openBeatLab:()=>void;capturedTakes:CapturedTake[];recoveryReady:boolean;captureSupported:boolean;online:boolean;storageMb:number|null;desktopEngine:DesktopEngine}) {
   return <div className="record-home">
     <section className="session-entry">
       <div className="session-entry-copy">
@@ -722,6 +693,7 @@ function RecordNowHome({start,openSetup,openLink,capturedTakes,recoveryReady,cap
       </div>
       <div className="session-entry-actions">
         <button className="record-launch" onClick={start}><span><i/></span><p><strong>START RECORDING</strong><small>Choose audio and begin</small></p><b>PRIMARY</b></button>
+        <button className="link-launch" onClick={openBeatLab}><span><i/><i/></span><p><strong>OPEN BEAT LAB</strong><small>Play pads, flip a sample, arrange a beat</small></p><b>MAKE</b></button>
         <button className="link-launch" onClick={openLink}><span><i/><i/></span><p><strong>JOIN SOMEONE</strong><small>Open or create a Link Session</small></p><b>REMOTE</b></button>
         {capturedTakes.length>0&&<button className="recovery-launch" onClick={openSetup}><span>{String(capturedTakes.length).padStart(2,"0")}</span><p><strong>RECOVER A TAKE</strong><small>Continue protected work on this device</small></p><b>LOCAL</b></button>}
         <NativeEnginePanel engine={desktopEngine}/>
