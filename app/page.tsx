@@ -268,8 +268,9 @@ function SessionWorkspace({announce,openVault,openLyrics,openLink,openBeatLab}:{
 
   useEffect(()=>{
     const updateNetwork=()=>setOnline(navigator.onLine);
+    const updateCapture=()=>setCaptureSupported(Boolean(navigator.mediaDevices?.getUserMedia&&window.MediaRecorder));
     updateNetwork();
-    setCaptureSupported(Boolean(navigator.mediaDevices?.getUserMedia&&window.MediaRecorder));
+    updateCapture();
     window.addEventListener("online",updateNetwork);
     window.addEventListener("offline",updateNetwork);
     if(navigator.storage?.estimate)void navigator.storage.estimate().then(({quota=0,usage=0})=>setStorageMb(Math.max(0,Math.round((quota-usage)/1024/1024)))).catch(()=>setStorageMb(null));
