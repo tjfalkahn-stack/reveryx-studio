@@ -67,6 +67,8 @@ export class BeatLabRuntime {
   private uiListeners = new Set<() => void>();
   uiVersion = 0;
   private restored = false;
+  chokedPadId: string | null = null;
+  private chokeClearTimer: number | null = null;
 
   constructor(state = new BeatLabState()) {
     this.state = state;
@@ -233,7 +235,11 @@ export class BeatLabRuntime {
     }
     const voice: Voice = { padId: pad.id, source, gain, chokeGroup: pad.chokeGroup };
     this.voices.push(voice);
-    source.onended = () => { this.voices = this.voices.filter((item) => item !== voice); };
+    this.notifyUi();
+    source.onended = () => {
+      this.voices = this.voices.filter((item) => item !== voice);
+      this.notifyUi();
+    };
     if (this.voices.length > 48) this.stopVoice(this.voices[0], ctx.currentTime);
   }
 
@@ -251,8 +257,33 @@ export class BeatLabRuntime {
 
   private choke(group: number, time: number, exceptPadId: string) {
     for (const voice of this.voices) {
-      if (voice.chokeGroup === group && voice.padId !== exceptPadId) this.stopVoice(voice, time);
+      if (voice.chokeGroup === group && voice.padId !== exceptPadId) {
+        this.markChoked(voice.padId);
+        this.stopVoice(voice, time);
+      }
     }
+  }
+
+  private markChoked(padId: string) {
+    this.chokedPadId = padId;
+    this.notifyUi();
+    if (this.chokeClearTimer) window.clearTimeout(this.chokeClearTimer);
+    this.chokeClearTimer = window.setTimeout(() => {
+      this.chokedPadId = null;
+      this.notifyUi();
+    }, 140) as unknown as number;
+  }
+
+  soundingPadIds(): string[] {
+    return [...new Set(this.voices.map((voice) => voice.padId))];
+  }
+
+  heldPadIds(): string[] {
+    return [...this.held];
+  }
+
+  inCountIn(): boolean {
+    return Boolean(this.playing && this.ctx && this.ctx.currentTime < this.countInUntil);
   }
 
   private stopVoice(voice: Voice, time: number) {
@@ -263,6 +294,7 @@ export class BeatLabRuntime {
       voice.source.stop(time + 0.04);
     } catch { /* already stopped */ }
     this.voices = this.voices.filter((item) => item !== voice);
+    this.notifyUi();
   }
 
   stopAllVoices() {
@@ -272,6 +304,7 @@ export class BeatLabRuntime {
 
   padOn(padId: string, velocity = 1) {
     this.held.add(padId);
+    this.notifyUi();
     void this.triggerPad(padId, velocity);
     if (this.recording && this.playing) this.captureNote(padId, velocity);
     if (this.erase) this.state.erasePadFromPattern(padId);
@@ -280,6 +313,7 @@ export class BeatLabRuntime {
 
   padOff(padId: string) {
     this.held.delete(padId);
+    this.notifyUi();
     this.releasePad(padId);
     this.stopRepeat(padId);
   }
@@ -508,7 +542,8 @@ export class BeatLabRuntime {
     osc.stop(time + 0.06);
   }
 
-  async importFiles(files: File[]) {
+  async importFiles(files: File[], padId?: string) {
+    if (padId) this.state.selectPad(padId);
     const ctx = await this.ensureContext();
     for (const file of files) {
       if (!file.type.startsWith("audio/") && !/\.(wav|mp3|aif|aiff|m4a|ogg|flac)$/i.test(file.name)) {

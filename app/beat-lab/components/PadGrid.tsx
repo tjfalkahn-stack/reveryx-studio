@@ -1,20 +1,37 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useCallback, useState, useSyncExternalStore, type CSSProperties, type MutableRefObject } from "react";
 import { BANKS, padsInBank } from "../core/pads";
-import { keyToPadIndex, isTypingTarget } from "../input/pad-input";
+import { selectedPattern } from "../core/project-schema";
+import { EMPTY_PAD_ACTION, padDisplayName, padHasSound, padStateClass } from "../core/ux";
+import { padKeyLabel } from "../input/pad-input";
 import { useBeatLabRuntime } from "./runtime-context";
 
-export function PadGrid() {
+export function PadGrid({
+  onEditPad,
+  onPlayedPad,
+  padRefs,
+  compact = false,
+}: {
+  onEditPad?: (padId: string, node: HTMLButtonElement | null) => void;
+  onPlayedPad?: () => void;
+  padRefs?: MutableRefObject<Map<string, HTMLButtonElement>>;
+  compact?: boolean;
+}) {
   const runtime = useBeatLabRuntime();
   const project = useSyncExternalStore(runtime.state.subscribe, runtime.state.getSnapshot, runtime.state.getSnapshot);
+  useSyncExternalStore(runtime.subscribeUi, runtime.getUiSnapshot, runtime.getUiSnapshot);
   const pads = padsInBank(project.pads, project.selectedBank);
+  const pattern = selectedPattern(project);
   const [pressed, setPressed] = useState<Set<string>>(new Set());
+  const sounding = new Set(runtime.soundingPadIds());
+  const held = new Set(runtime.heldPadIds());
 
   const on = useCallback((id: string, velocity = 1) => {
     setPressed((current) => new Set(current).add(id));
     runtime.padOn(id, velocity);
-  }, [runtime]);
+    onPlayedPad?.();
+  }, [runtime, onPlayedPad]);
 
   const off = useCallback((id: string) => {
     setPressed((current) => {
@@ -25,64 +42,99 @@ export function PadGrid() {
     runtime.padOff(id);
   }, [runtime]);
 
-  useEffect(() => {
-    const down = (event: KeyboardEvent) => {
-      if (event.repeat || isTypingTarget(event.target)) return;
-      const index = keyToPadIndex(event.key);
-      if (index == null) return;
-      event.preventDefault();
-      const pad = padsInBank(runtime.state.project.pads, runtime.state.project.selectedBank)[index];
-      if (pad) on(pad.id);
-    };
-    const up = (event: KeyboardEvent) => {
-      if (isTypingTarget(event.target)) return;
-      const index = keyToPadIndex(event.key);
-      if (index == null) return;
-      const pad = padsInBank(runtime.state.project.pads, runtime.state.project.selectedBank)[index];
-      if (pad) off(pad.id);
-    };
-    window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
-    return () => {
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
-    };
-  }, [on, off, runtime]);
-
-  return <section className="bl-pads" aria-label="Pad grid">
+  return <section className={`bl-pads${compact ? " compact" : ""}`} aria-label="Pad grid">
     <div className="bl-banks">
       {BANKS.map((bank) => (
-        <button key={bank} type="button" className={project.selectedBank === bank ? "active" : ""} onClick={() => runtime.state.selectBank(bank)}>Bank {bank}</button>
+        <button
+          key={bank}
+          type="button"
+          className={project.selectedBank === bank ? "active" : ""}
+          aria-pressed={project.selectedBank === bank}
+          onClick={() => runtime.state.selectBank(bank)}
+        >
+          Bank {bank}
+        </button>
       ))}
+      <small className="bl-keyboard-hint">Keyboard enabled</small>
     </div>
     <div className="bl-pad-grid">
-      {pads.map((pad) => {
-        const assigned = Boolean(pad.assetId || pad.starterKey);
+      {pads.map((pad, index) => {
+        const assigned = padHasSound(pad);
         const missing = pad.assetId ? project.assets.find((asset) => asset.id === pad.assetId)?.missing : false;
-        return <button
-          key={pad.id}
-          type="button"
-          className={`bl-pad ${project.selectedPadId === pad.id ? "selected" : ""} ${pressed.has(pad.id) ? "pressed" : ""} ${pad.mute ? "muted" : ""} ${pad.solo ? "solo" : ""} ${missing ? "missing" : ""}`}
-          style={{ "--pad-color": pad.color } as CSSProperties}
-          aria-label={`${pad.name}${assigned ? "" : " empty"}`}
-          onPointerDown={(event) => {
-            event.preventDefault();
-            (event.currentTarget as HTMLButtonElement).setPointerCapture(event.pointerId);
-            runtime.state.selectPad(pad.id);
-            void runtime.ensureContext();
-            on(pad.id, event.pressure > 0.1 ? event.pressure : 1);
-          }}
-          onPointerUp={() => off(pad.id)}
-          onPointerCancel={() => off(pad.id)}
-          onPointerLeave={(event) => { if (event.buttons) off(pad.id); }}
-          onContextMenu={(event) => event.preventDefault()}
-        >
-          <small>{pad.id}</small>
-          <strong>{pad.name}</strong>
-          <span>{assigned ? (missing ? "Missing sample" : pad.starterKey ? "Starter" : "Sample") : "Empty"}</span>
-        </button>;
+        const hasEvents = pattern.events.some((event) => event.padId === pad.id);
+        const keyLabel = padKeyLabel(index);
+        const name = padDisplayName(pad);
+        const isPressed = pressed.has(pad.id) || held.has(pad.id);
+        const stateClass = padStateClass({
+          empty: !assigned,
+          selected: project.selectedPadId === pad.id,
+          pressed: isPressed,
+          sounding: sounding.has(pad.id),
+          muted: pad.mute,
+          soloed: pad.solo,
+          choked: runtime.chokedPadId === pad.id,
+          hasEvents,
+          missing: Boolean(missing),
+        });
+        return <div key={pad.id} className="bl-pad-cell">
+          <button
+            ref={(node) => {
+              if (!padRefs) return;
+              if (node) padRefs.current.set(pad.id, node);
+              else padRefs.current.delete(pad.id);
+            }}
+            type="button"
+            className={stateClass}
+            style={{ "--pad-color": pad.color } as CSSProperties}
+            aria-label={`${name}, ${pad.id}, shortcut ${keyLabel}${assigned ? "" : ", empty"}${hasEvents ? ", has recorded events" : ""}${pad.mute ? ", muted" : ""}${pad.solo ? ", solo" : ""}`}
+            aria-keyshortcuts={keyLabel}
+            aria-pressed={isPressed}
+            aria-current={project.selectedPadId === pad.id ? "true" : undefined}
+            onPointerDown={(event) => {
+              if ((event.target as HTMLElement).closest(".bl-pad-edit")) return;
+              event.preventDefault();
+              (event.currentTarget as HTMLButtonElement).setPointerCapture(event.pointerId);
+              runtime.state.selectPad(pad.id);
+              void runtime.ensureContext();
+              on(pad.id, event.pressure > 0.1 ? event.pressure : 1);
+            }}
+            onPointerUp={() => off(pad.id)}
+            onPointerCancel={() => off(pad.id)}
+            onPointerLeave={(event) => { if (event.buttons) off(pad.id); }}
+            onContextMenu={(event) => event.preventDefault()}
+            onDragOver={(event) => { event.preventDefault(); event.currentTarget.classList.add("drop-target"); }}
+            onDragLeave={(event) => event.currentTarget.classList.remove("drop-target")}
+            onDrop={(event) => {
+              event.preventDefault();
+              event.currentTarget.classList.remove("drop-target");
+              const files = Array.from(event.dataTransfer?.files || []);
+              if (files.length) void runtime.importFiles(files, pad.id);
+            }}
+          >
+            <kbd className="bl-pad-key" aria-label={`Keyboard shortcut ${keyLabel}.`}>{keyLabel}</kbd>
+            <small>{pad.id}</small>
+            <strong>{name}</strong>
+            <span className="bl-pad-meta">
+              {assigned ? (missing ? "Missing sample" : pad.starterKey ? "Starter" : "Sample") : EMPTY_PAD_ACTION}
+              {hasEvents ? " · Events" : ""}
+              {pad.mute ? " · Mute" : ""}
+              {pad.solo ? " · Solo" : ""}
+              {sounding.has(pad.id) ? " · Playing" : ""}
+              {runtime.chokedPadId === pad.id ? " · Choke" : ""}
+            </span>
+          </button>
+          {onEditPad && <button
+            type="button"
+            className="bl-pad-edit"
+            aria-label={`Edit ${name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              runtime.state.selectPad(pad.id);
+              onEditPad(pad.id, padRefs?.current.get(pad.id) || null);
+            }}
+          >Edit</button>}
+        </div>;
       })}
     </div>
-    <p className="bl-pad-help">Computer keys 1-4, Q-R, A-F, Z-V play this bank. Keys are ignored while typing in a field.</p>
   </section>;
 }

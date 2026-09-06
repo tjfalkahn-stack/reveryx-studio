@@ -136,6 +136,19 @@ export class BeatLabState {
     this.update("Clear pad", (project) => ({ ...project, pads: clearPad(project.pads, project.selectedPadId) }));
   }
 
+  resetSelectedPadValues() {
+    this.update("Reset pad", (project) => ({
+      ...project,
+      pads: replacePad(project.pads, project.selectedPadId, {
+        volume: 0.9,
+        pan: 0,
+        pitchCents: 0,
+        attack: 0.002,
+        release: 0.04,
+      }),
+    }));
+  }
+
   selectPattern(id: string, playing = false) {
     if (playing && id !== this.project.selectedPatternId) {
       this.update("Queue pattern", (project) => ({ ...project, queuedPatternId: id }), false);
@@ -328,6 +341,22 @@ export class BeatLabState {
   normalizeSelectedPad(samples: Float32Array) {
     const gain = computeNormalizeGain(samples);
     this.patchPad(this.project.selectedPadId, { normalizeGain: gain }, "Normalize");
+  }
+
+  get canUndo() {
+    return this.history.canUndo;
+  }
+
+  get canRedo() {
+    return this.history.canRedo;
+  }
+
+  get undoLabel() {
+    return this.history.undoLabel;
+  }
+
+  get redoLabel() {
+    return this.history.redoLabel;
   }
 
   undo() {
