@@ -41,4 +41,12 @@ export class ProjectHistory {
   get canRedo() {
     return this.future.length > 0;
   }
+
+  get undoLabel() {
+    return this.past.at(-1)?.label || "";
+  }
+
+  get redoLabel() {
+    return this.future.at(-1)?.label || "";
+  }
 }

@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { selectedPad } from "../core/project-schema";
 import { STARTER_KIT } from "../core/starter-kit";
+import { formatSeconds } from "../core/ux";
+import { ToggleButton } from "./ToggleButton";
 import { useBeatLabRuntime } from "./runtime-context";
 
-export function SampleLab() {
+export function SampleLab({ onAssignedSound }: { onAssignedSound?: () => void }) {
   const runtime = useBeatLabRuntime();
   const project = useSyncExternalStore(runtime.state.subscribe, runtime.state.getSnapshot, runtime.state.getSnapshot);
   const pad = selectedPad(project);
@@ -13,9 +15,11 @@ export function SampleLab() {
   const fileRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState(0);
   const [recording, setRecording] = useState(false);
+  const [drag, setDrag] = useState<"start" | "end" | null>(null);
   const pcm = runtime.sourcePcm(pad);
 
   const view = useMemo(() => {
@@ -68,7 +72,8 @@ export function SampleLab() {
     const drop = (event: DragEvent) => {
       event.preventDefault();
       node.classList.remove("drop");
-      void runtime.importFiles(Array.from(event.dataTransfer?.files || []));
+      void runtime.importFiles(Array.from(event.dataTransfer?.files || []), pad.id);
+      onAssignedSound?.();
     };
     node.addEventListener("dragover", over);
     node.addEventListener("dragleave", leave);
@@ -78,41 +83,81 @@ export function SampleLab() {
       node.removeEventListener("dragleave", leave);
       node.removeEventListener("drop", drop);
     };
-  }, [runtime]);
+  }, [runtime, pad.id, onAssignedSound]);
+
+  function timeFromClientX(clientX: number) {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return pad.start;
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    return view.start + ratio * view.window;
+  }
+
+  function moveMarker(which: "start" | "end", time: number) {
+    if (which === "start") runtime.state.patchPad(pad.id, { start: Math.min(time, pad.end - 0.01) }, "Start");
+    else runtime.state.patchPad(pad.id, { end: Math.max(time, pad.start + 0.01) }, "End");
+  }
+
+  const startPct = ((pad.start - view.start) / Math.max(view.window, 0.001)) * 100;
+  const endPct = ((pad.end - view.start) / Math.max(view.window, 0.001)) * 100;
 
   return <section className="bl-sample-lab" ref={dropRef} aria-label="Sample lab">
     <header>
       <div>
         <small>Sample lab</small>
-        <strong>{asset?.name || (pad.starterKey ? STARTER_KIT.find((item) => item.key === pad.starterKey)?.name : "No user sample")}</strong>
+        <strong>{asset?.name || (pad.starterKey ? STARTER_KIT.find((item) => item.key === pad.starterKey)?.name : "Drop a sound on this pad")}</strong>
       </div>
       <div className="bl-sample-actions">
         <button type="button" onClick={() => fileRef.current?.click()}>Import</button>
         <button type="button" disabled={recording} onClick={() => { setRecording(true); void runtime.recordSample(3).finally(() => setRecording(false)); }}>{recording ? "Recording…" : "Mic sample"}</button>
         <button type="button" onClick={() => { const buffer = runtime.padBuffer(pad); if (buffer) void runtime.triggerPad(pad.id); }}>Audition</button>
       </div>
-      <input ref={fileRef} className="file-input" type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.m4a,.ogg,.flac" multiple onChange={(event) => { void runtime.importFiles(Array.from(event.target.files || [])); event.target.value = ""; }} />
+      <input ref={fileRef} className="file-input" type="file" accept="audio/*,.wav,.mp3,.aif,.aiff,.m4a,.ogg,.flac" multiple onChange={(event) => { void runtime.importFiles(Array.from(event.target.files || []), pad.id); onAssignedSound?.(); event.target.value = ""; }} />
     </header>
-    <div className="bl-browser">
+    <div className="bl-browser" aria-label="Sound assignment">
       {STARTER_KIT.map((sound) => (
-        <button key={sound.key} type="button" className={pad.starterKey === sound.key ? "active" : ""} onClick={() => runtime.state.patchPad(pad.id, { starterKey: sound.key, assetId: null, name: sound.name, color: sound.color, end: sound.end, stemBus: sound.stem, chokeGroup: sound.chokeGroup }, "Assign starter")}>{sound.name}</button>
+        <button key={sound.key} type="button" className={pad.starterKey === sound.key ? "active" : ""} onClick={() => { runtime.state.patchPad(pad.id, { starterKey: sound.key, assetId: null, name: sound.name, color: sound.color, end: sound.end, stemBus: sound.stem, chokeGroup: sound.chokeGroup }, "Assign starter"); onAssignedSound?.(); }}>{sound.name}</button>
       ))}
       {project.assets.map((item) => (
-        <button key={item.id} type="button" className={pad.assetId === item.id ? "active" : ""} onClick={() => runtime.state.patchPad(pad.id, { assetId: item.id, starterKey: null, name: item.name.replace(/\.[^.]+$/, "").slice(0, 24), start: 0, end: item.duration, stemBus: "sample" }, "Assign sample")}>{item.missing ? `Missing · ${item.name}` : item.name}</button>
+        <button key={item.id} type="button" className={pad.assetId === item.id ? "active" : ""} onClick={() => { runtime.state.patchPad(pad.id, { assetId: item.id, starterKey: null, name: item.name.replace(/\.[^.]+$/, "").slice(0, 24), start: 0, end: item.duration, stemBus: "sample" }, "Assign sample"); onAssignedSound?.(); }}>{item.missing ? `Missing · ${item.name}` : item.name}</button>
       ))}
     </div>
-    <canvas ref={canvasRef} className="bl-wave" aria-label="Sample waveform" onClick={(event) => {
-      if (!asset) return;
-      const rect = event.currentTarget.getBoundingClientRect();
-      const time = view.start + ((event.clientX - rect.left) / rect.width) * view.window;
-      runtime.state.addManualSlice(asset.id, time);
-    }} />
+    <div
+      ref={wrapRef}
+      className="bl-wave-wrap"
+      onPointerMove={(event) => { if (drag) moveMarker(drag, timeFromClientX(event.clientX)); }}
+      onPointerUp={() => setDrag(null)}
+      onPointerLeave={() => setDrag(null)}
+    >
+      <canvas ref={canvasRef} className="bl-wave" aria-label="Sample waveform" onClick={(event) => {
+        if (!asset || drag) return;
+        const time = timeFromClientX(event.clientX);
+        runtime.state.addManualSlice(asset.id, time);
+      }} />
+      <button
+        type="button"
+        className="bl-wave-handle start"
+        style={{ left: `${Math.min(100, Math.max(0, startPct))}%` }}
+        aria-label={`Start marker ${formatSeconds(pad.start)}`}
+        onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setDrag("start"); }}
+      >Start {formatSeconds(pad.start)}</button>
+      <button
+        type="button"
+        className="bl-wave-handle end"
+        style={{ left: `${Math.min(100, Math.max(0, endPct))}%` }}
+        aria-label={`End marker ${formatSeconds(pad.end)}`}
+        onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setDrag("end"); }}
+      >End {formatSeconds(pad.end)}</button>
+    </div>
     <div className="bl-wave-tools">
       <label>Zoom <input type="range" min={1} max={16} step={0.1} value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label>
       <label>Position <input type="range" min={0} max={100} value={Math.round((view.start / Math.max(view.duration, 0.01)) * 100)} onChange={(event) => setOffset((Number(event.target.value) / 100) * view.duration)} /></label>
       <button type="button" onClick={() => runtime.state.patchPad(pad.id, { fadeIn: 0.008, fadeOut: 0.012 }, "Fades")}>Short fades</button>
       <button type="button" onClick={() => { const samples = runtime.sourcePcm(pad); if (samples) runtime.state.normalizeSelectedPad(samples); }}>Normalize</button>
-      <button type="button" onClick={() => runtime.state.patchPad(pad.id, { reverse: !pad.reverse }, "Reverse")}>Reverse</button>
+      <ToggleButton pressed={pad.reverse} onPressedChange={(next) => runtime.state.patchPad(pad.id, { reverse: next }, "Reverse")}>Reverse</ToggleButton>
+      <div className="bl-seg" role="group" aria-label="Play mode">
+        <button type="button" className={pad.playMode === "one-shot" ? "active" : ""} aria-pressed={pad.playMode === "one-shot"} onClick={() => runtime.state.patchPad(pad.id, { playMode: "one-shot" }, "One-shot")}>One-shot</button>
+        <button type="button" className={pad.playMode === "gate" ? "active" : ""} aria-pressed={pad.playMode === "gate"} onClick={() => runtime.state.patchPad(pad.id, { playMode: "gate" }, "Gate")}>Gate</button>
+      </div>
       {[2, 4, 8, 16].map((count) => asset && <button key={count} type="button" onClick={() => runtime.state.equalSlices(asset.id, count as 2 | 4 | 8 | 16)}>Divide {count}</button>)}
       <button type="button" disabled={!asset} onClick={() => void runtime.autoSliceSelected()}>Auto slice</button>
       <button type="button" disabled={!asset} onClick={() => asset && runtime.state.assignSlicesToPads(asset.id)}>Assign slices</button>

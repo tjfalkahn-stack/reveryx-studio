@@ -140,7 +140,7 @@ export default function Home() {
     window.setTimeout(() => setToast(""), 2600);
   }
 
-  return <StudioSessionProvider><main className="studio-shell">
+  return <StudioSessionProvider><main className={`studio-shell ${view==="beatlab"?"beatlab-open":""}`}>
     {toast && <div className="toast" role="status"><span>✓</span>{toast}</div>}
     <AppRail view={view} setView={setView} />
     <section className="workspace">
