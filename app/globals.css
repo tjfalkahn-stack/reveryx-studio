@@ -348,6 +348,20 @@ body{min-height:100%;overflow-x:hidden}
   .bl-transport-controls{width:100%}
   .bl-transport-controls button{flex:1;min-height:44px}
   .bl-record-beat{width:100%;margin:0}
+  .beat-lab.mode-play .bl-record-beat{display:none}
+  .beat-lab.mode-play .bl-now,.beat-lab.mode-play .bl-history-hint,.beat-lab.mode-play .bl-save{display:none}
+  .beat-lab.mode-play .bl-guide{padding:6px 8px}
+  .beat-lab.mode-play .bl-guide ol{margin:4px 0 0;gap:6px}
+  .beat-lab.mode-play .bl-title{height:36px;font-size:16px}
+  .beat-lab.mode-play .bl-clock small,.beat-lab.mode-play .bl-clock span,.beat-lab.mode-play .bl-status{display:none}
+  .beat-lab.mode-play .bl-clock strong{font-size:18px}
+  .beat-lab.mode-play .bl-bpm,
+  .bl-transport.mode-play .bl-toggle-btn,
+  .bl-transport.mode-play label{display:none}
+  .beat-lab.mode-play .bl-pad{min-height:56px}
+  .beat-lab.mode-play .bl-pad small{display:none}
+  .beat-lab.mode-play .bl-pattern-strip{grid-template-columns:repeat(8,minmax(0,1fr));margin-bottom:8px}
+  .beat-lab.mode-play .bl-pattern-empty{display:none}
   .bl-pad-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
   .bl-pad{min-height:74px;padding:6px 22px 6px 6px}
   .bl-pad-edit{min-height:44px;min-width:44px}
@@ -356,7 +370,9 @@ body{min-height:100%;overflow-x:hidden}
   .bl-pattern-strip{grid-template-columns:repeat(4,minmax(0,1fr))}
   .bl-value-row{grid-template-columns:1fr;gap:4px}
   .bl-inspector-layer{align-items:flex-end}
-  .bl-inspector.modal{width:100%;height:auto;max-height:min(82vh,720px);border-radius:18px 18px 0 0;padding:12px 12px calc(16px + env(safe-area-inset-bottom,0px))}
+  .bl-inspector.modal{width:100%;height:auto;max-height:min(82vh,720px);border-radius:18px 18px 0 0;padding:12px 12px calc(16px + env(safe-area-inset-bottom,0px));box-shadow:0 -12px 40px rgba(0,0,0,.45)}
+  .bl-inspector.modal header{position:sticky;top:0;background:#0b1113;padding-top:4px}
+  .bl-inspector.modal header:before{content:"";display:block;width:36px;height:4px;border-radius:99px;background:#3a4446;margin:0 auto 8px}
 }
 @media(hover:none){.bl-pad-key{opacity:.55}}
 @media(prefers-reduced-motion:reduce){.bl-pad,.bl-pad.pressed,.bl-pad.sounding,.bl-toggle-btn i:after{transition:none;transform:none}}
