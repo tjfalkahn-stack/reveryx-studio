@@ -12,6 +12,7 @@ import { encodeBwf24FromChannels, readBwfTimeReference, wavDataLength } from "..
 import { detectBpmFromFilename, detectTrackRole, shouldWarnVocalAlignment } from "../app/session/load-song.ts";
 import { renderStarterSample, STARTER_KIT } from "../app/beat-lab/core/starter-kit.ts";
 import { BEAT_LAB_EXTENSIONS } from "../app/beat-lab/extensions.ts";
+import { extractedAudioName, normalizeExtraction, trimPcmChannels } from "../app/audio/extraction.ts";
 
 test("quantize snaps to 16th and triplet grids", () => {
   assert.equal(quantizeTicks(10, "1/16"), 0);
@@ -157,6 +158,22 @@ test("existing session import helpers still detect bpm and roles", () => {
   assert.equal(detectTrackRole("drums_left.wav", 1), "DRUMS");
   assert.equal(detectTrackRole("lead-vocal.wav", 3), "VOCAL");
   assert.equal(detectTrackRole("song.wav", 0), "BEAT");
+});
+
+test("audio extractor creates safe studio names and exact trims", () => {
+  assert.equal(extractedAudioName("Tarmac Scene 01.mov"), "Tarmac Scene 01 - extracted audio.wav");
+  assert.equal(extractedAudioName("voice.memo.m4a"), "voice.memo - extracted audio.wav");
+  const source = [Float32Array.from([0, 1, 2, 3, 4, 5, 6, 7])];
+  const trimmed = trimPcmChannels(source, 4, 0.5, 1.5);
+  assert.deepEqual(Array.from(trimmed[0]), [2, 3, 4, 5]);
+  assert.deepEqual(Array.from(source[0]), [0, 1, 2, 3, 4, 5, 6, 7]);
+});
+
+test("audio extractor normalizes PCM to the Pro Tools handoff rate", () => {
+  const normalized = normalizeExtraction([Float32Array.from([0, .25, .5, .75])], 4, 8);
+  assert.equal(normalized.sampleRate, 8);
+  assert.equal(normalized.channels[0].length, 8);
+  assert.equal(normalized.duration, 1);
 });
 
 test("starter kit is original synthesis and non-silent", () => {
