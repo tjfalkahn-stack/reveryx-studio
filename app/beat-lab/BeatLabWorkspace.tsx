@@ -31,6 +31,16 @@ export default function BeatLabWorkspace({ announce, openRecorder }: { announce:
     };
   }, [runtime]);
 
+  useEffect(() => {
+    if (!session.pendingBeatLabFiles.length) return;
+    const files = session.pendingBeatLabFiles;
+    session.clearPendingBeatLabFiles();
+    void runtime.restore()
+      .then(() => runtime.importFiles(files))
+      .then(() => announce(`${files.length === 1 ? files[0].name : `${files.length} extracted files`} added to the Sound Vault and assigned to Beat Lab.`))
+      .catch(() => announce("The extracted audio is safe, but Beat Lab could not load it yet."));
+  }, [announce, runtime, session.pendingBeatLabFiles]);
+
   async function recordToThisBeat() {
     try {
       await runtime.ensureContext();

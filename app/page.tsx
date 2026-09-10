@@ -4,11 +4,12 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import LinkSessions from "./link-sessions";
 import BeatLabWorkspace from "./beat-lab/BeatLabWorkspace";
+import AudioExtractor from "./audio-extractor";
 import { decodeAt48k, encodeBwf24, PRO_TOOLS_SAMPLE_RATE } from "./audio/bwf";
 import { detectBpmFromFilename, detectTrackRole, peaksFromSamples, shouldWarnVocalAlignment, titleFromFilename } from "./session/load-song";
 import { StudioSessionProvider, useStudioSession } from "./session/studio-session";
 
-type View = "session" | "beatlab" | "link" | "wordwave" | "library" | "deliveries";
+type View = "session" | "beatlab" | "extract" | "link" | "wordwave" | "library" | "deliveries";
 type TakeState = "captured" | "keep" | "recovery";
 type CapturedTake = { id:number; name:string; url:string; seconds:number; state:TakeState; mime:string; start:number; punchLabel:string };
 type ImportedTrack = { id:number; name:string; url:string; duration:number; peaks:number[]; role:string; format:string };
@@ -146,6 +147,7 @@ export default function Home() {
     <section className="workspace">
       {view === "session" && <SessionWorkspace announce={announce} openVault={() => setView("library")} openLyrics={() => setView("wordwave")} openLink={() => setView("link")} openBeatLab={() => setView("beatlab")} />}
       {view === "beatlab" && <BeatLabWorkspace announce={announce} openRecorder={() => setView("session")} />}
+      {view === "extract" && <AudioExtractor announce={announce} openRecorder={() => setView("session")} openBeatLab={() => setView("beatlab")} />}
       {view === "link" && <LinkSessions announce={announce} />}
       {view === "wordwave" && <WordwaveStudio announce={announce} openSession={() => setView("session")} />}
       {view === "library" && <LibraryHub announce={announce} openSession={() => setView("session")} />}
@@ -158,6 +160,7 @@ function AppRail({view,setView}:{view:View;setView:(view:View)=>void}) {
   const items:{id:View;icon:RailIconName;label:string}[] = [
     {id:"session",icon:"session",label:"Record"},
     {id:"beatlab",icon:"beatlab",label:"Beat Lab"},
+    {id:"extract",icon:"extract",label:"Extract"},
     {id:"link",icon:"link",label:"Collaborate"},
     {id:"library",icon:"library",label:"Library"},
     {id:"deliveries",icon:"deliveries",label:"Finish"},
@@ -175,12 +178,13 @@ function AppRail({view,setView}:{view:View;setView:(view:View)=>void}) {
   </aside>;
 }
 
-type RailIconName = "session" | "beatlab" | "link" | "library" | "deliveries";
+type RailIconName = "session" | "beatlab" | "extract" | "link" | "library" | "deliveries";
 
 function RailIcon({name}:{name:RailIconName}) {
   const common = {width:24,height:24,viewBox:"0 0 24 24",fill:"none",xmlns:"http://www.w3.org/2000/svg","aria-hidden":true as const};
   if (name === "session") return <svg {...common}><circle cx="12" cy="12" r="7.25"/><circle cx="12" cy="12" r="2.25"/><path d="M12 2.75v2M12 19.25v2M2.75 12h2M19.25 12h2"/></svg>;
   if (name === "beatlab") return <svg {...common}><rect x="3.5" y="3.5" width="7" height="7"/><rect x="13.5" y="3.5" width="7" height="7"/><rect x="3.5" y="13.5" width="7" height="7"/><rect x="13.5" y="13.5" width="7" height="7"/></svg>;
+  if (name === "extract") return <svg {...common}><path d="M3 8.5h3l1.5-4 3 15 3-11 2 7 1.5-4H21"/><path d="M4 21h16"/></svg>;
   if (name === "link") return <svg {...common}><path d="M9.5 14.5 14.5 9"/><path d="M7.4 16.6 5.8 18.2a3.4 3.4 0 0 1-4.8-4.8l3.2-3.2A3.4 3.4 0 0 1 9 10M14.9 14a3.4 3.4 0 0 0 4.9-.2l3.2-3.2a3.4 3.4 0 0 0-4.8-4.8l-1.6 1.6"/></svg>;
   if (name === "library") return <svg {...common}><path d="M4.5 5.5h6v13h-6zM13.5 5.5h6v13h-6z"/><path d="M7.5 9h0M16.5 9h0"/></svg>;
   return <svg {...common}><path d="M5 15.5v3.25h14V5H8.75"/><path d="M12 5h7v7M19 5l-9 9"/></svg>;

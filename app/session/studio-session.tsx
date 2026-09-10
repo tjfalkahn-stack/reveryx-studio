@@ -40,6 +40,9 @@ type StudioSessionValue = {
   sessionBeat: SessionBeat;
   setSessionBeat: (beat: SessionBeat | ((current: SessionBeat) => SessionBeat)) => void;
   applyBeatHandoff: (payload: BeatToRecorderHandoff) => void;
+  pendingBeatLabFiles: File[];
+  queueBeatLabFile: (file: File) => void;
+  clearPendingBeatLabFiles: () => void;
   hasVocals: boolean;
   setHasVocals: (value: boolean) => void;
   lockedBeatRevision: number | null;
@@ -50,6 +53,7 @@ const StudioSessionContext = createContext<StudioSessionValue | null>(null);
 
 export function StudioSessionProvider({ children }: { children: ReactNode }) {
   const [sessionBeat, setSessionBeat] = useState<SessionBeat>(EMPTY_SESSION_BEAT);
+  const [pendingBeatLabFiles, setPendingBeatLabFiles] = useState<File[]>([]);
   const [hasVocals, setHasVocals] = useState(false);
   const [lockedBeatRevision, setLockedBeatRevision] = useState<number | null>(null);
   const value = useMemo<StudioSessionValue>(() => ({
@@ -79,11 +83,14 @@ export function StudioSessionProvider({ children }: { children: ReactNode }) {
         };
       });
     },
+    pendingBeatLabFiles,
+    queueBeatLabFile: (file) => setPendingBeatLabFiles((current) => [...current, file]),
+    clearPendingBeatLabFiles: () => setPendingBeatLabFiles([]),
     hasVocals,
     setHasVocals,
     lockedBeatRevision,
     lockVocalsToRevision: setLockedBeatRevision,
-  }), [sessionBeat, hasVocals, lockedBeatRevision]);
+  }), [sessionBeat, pendingBeatLabFiles, hasVocals, lockedBeatRevision]);
   return <StudioSessionContext.Provider value={value}>{children}</StudioSessionContext.Provider>;
 }
 
